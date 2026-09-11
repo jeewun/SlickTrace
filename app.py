@@ -74,7 +74,7 @@ minimum_area = st.sidebar.slider(
 )
 
 if uploaded_file is None:
-    st.info("Upload an image to begin. You can use data/input.png or data/real_Sar.png.")
+    st.info("Upload an image to begin. You can use sample files from `data/` (e.g. `class_1_01677.jpg` or `class_0_03687.jpg`).")
 
 else:
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
@@ -83,7 +83,21 @@ else:
     if original is None:
         st.error("Error decoding uploaded image. Please provide a valid PNG or JPEG image.")
     else:
-        # Run advanced OpenCV SAR candidate extraction
+        # 1. Evaluate Overall Image Patch with PyTorch MobileNetV3 Model
+        if model is not None:
+            overall_prob = predict_oil_probability(original, model)
+        else:
+            overall_prob = 0.0
+
+        # Display Overall Assessment Status Banner
+        if overall_prob >= 0.75:
+            st.error(f"🚨 **Overall Image Assessment**: High Oil-Like Confidence (**{overall_prob * 100:.1f}%**) — Human Review Required")
+        elif 0.45 <= overall_prob < 0.75:
+            st.warning(f"⚠️ **Overall Image Assessment**: Possible Slick (**{overall_prob * 100:.1f}%**) — Human Review Required")
+        else:
+            st.success(f"✅ **Overall Image Assessment**: Low Oil Probability (**{overall_prob * 100:.1f}%**)")
+
+        # 2. Run Advanced OpenCV Sub-Region Candidate Extraction
         extraction_result = extract_sar_candidates(
             image_gray=original,
             method=selected_method,
@@ -96,11 +110,10 @@ else:
         result = cv2.cvtColor(original, cv2.COLOR_GRAY2BGR)
 
         opencv_candidates = len(candidates)
-        detections = 0
+        sub_detections = 0
         scored_candidates = []
 
         for contour, (x, y, width, height), crop in candidates:
-            # Model scoring using PyTorch MobileNetV3
             if model is not None:
                 prob = predict_oil_probability(crop, model)
             else:
@@ -108,17 +121,15 @@ else:
 
             scored_candidates.append(prob)
 
-            # Score confidence threshold logic
             if prob >= 0.75:
-                detections += 1
-                label = f"High oil-like confidence — human review required ({prob * 100:.1f}%)"
-                color = (0, 0, 255)  # Red for high confidence
+                sub_detections += 1
+                label = f"High oil confidence ({prob * 100:.1f}%)"
+                color = (0, 0, 255)  # Red
             elif 0.45 <= prob < 0.75:
-                detections += 1
-                label = f"Possible slick — human review required ({prob * 100:.1f}%)"
-                color = (0, 255, 255)  # Yellow for medium confidence
+                sub_detections += 1
+                label = f"Possible slick ({prob * 100:.1f}%)"
+                color = (0, 255, 255)  # Yellow
             else:
-                # Below 0.45: do not show a positive alert
                 continue
 
             cv2.rectangle(
@@ -126,30 +137,24 @@ else:
                 (x, y),
                 (x + width, y + height),
                 color,
-                3,
+                2,
             )
 
             cv2.putText(
                 result,
                 label,
-                (x, max(25, y - 10)),
+                (x, max(20, y - 5)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
+                0.45,
                 color,
                 2,
             )
 
         m_col1, m_col2 = st.columns(2)
         with m_col1:
-            st.metric("OpenCV Candidates Found", opencv_candidates)
+            st.metric("OpenCV Sub-Candidates Found", opencv_candidates)
         with m_col2:
-            st.metric("AI Confirmed Slicks (≥ 45%)", detections)
-
-        if opencv_candidates == 0:
-            st.info("💡 **No dark regions detected by OpenCV.** Try switching the **Detection Strategy** to **Auto-Adaptive** or adjusting the **Minimum area** / **Darkness threshold**.")
-        elif detections == 0:
-            max_score = max(scored_candidates) * 100 if scored_candidates else 0.0
-            st.info(f"ℹ️ **OpenCV found {opencv_candidates} candidate region(s)**, but MobileNet model confidence was **{max_score:.1f}%** (below the 45% threshold required to trigger an alert).")
+            st.metric("AI Confirmed Sub-Slicks (≥ 45%)", sub_detections)
 
         left, right = st.columns(2)
 
