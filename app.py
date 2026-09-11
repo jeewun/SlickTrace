@@ -4,6 +4,7 @@ import numpy as np
 import streamlit as st
 
 from src.inference import load_slicktrace_model, predict_oil_probability
+from src.opencv_pipeline import extract_sar_candidates
 
 MODEL_PATH = "models/slicktrace_mobilenetv3.pth"
 
@@ -33,12 +34,36 @@ uploaded_file = st.file_uploader(
     type=["png", "jpg", "jpeg"],
 )
 
-threshold = st.sidebar.slider(
-    "Darkness threshold",
-    min_value=0,
-    max_value=255,
-    value=90,
+st.sidebar.header("Candidate Extraction Settings")
+
+detection_strategy = st.sidebar.selectbox(
+    "Detection Strategy",
+    options=[
+        "Auto-Adaptive (Sentinel-1 SAR)",
+        "Otsu Auto-Threshold",
+        "Manual Threshold (Legacy)",
+    ],
+    index=0,
+    help="Auto-Adaptive filters radar speckle noise and adjusts to local sea brightness gradients.",
 )
+
+strategy_map = {
+    "Auto-Adaptive (Sentinel-1 SAR)": "adaptive",
+    "Otsu Auto-Threshold": "otsu",
+    "Manual Threshold (Legacy)": "manual",
+}
+
+selected_method = strategy_map[detection_strategy]
+
+if selected_method == "manual":
+    threshold = st.sidebar.slider(
+        "Darkness threshold",
+        min_value=0,
+        max_value=255,
+        value=90,
+    )
+else:
+    threshold = 90  # Unused for adaptive/otsu
 
 minimum_area = st.sidebar.slider(
     "Minimum detection area",
@@ -49,7 +74,7 @@ minimum_area = st.sidebar.slider(
 )
 
 if uploaded_file is None:
-    st.info("Upload an image to begin. You can use data/input.png for now.")
+    st.info("Upload an image to begin. You can use data/input.png or data/real_Sar.png.")
 
 else:
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
@@ -58,75 +83,73 @@ else:
     if original is None:
         st.error("Error decoding uploaded image. Please provide a valid PNG or JPEG image.")
     else:
-        _, mask = cv2.threshold(
-            original,
-            threshold,
-            255,
-            cv2.THRESH_BINARY_INV,
+        # Run advanced OpenCV SAR candidate extraction
+        extraction_result = extract_sar_candidates(
+            image_gray=original,
+            method=selected_method,
+            min_area=minimum_area,
+            manual_thresh=threshold,
+            border_margin=10,
         )
 
-        contours, _ = cv2.findContours(
-            mask,
-            cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE,
-        )
-
+        candidates = extraction_result["candidates"]
         result = cv2.cvtColor(original, cv2.COLOR_GRAY2BGR)
-        image_height, image_width = original.shape
+
+        opencv_candidates = len(candidates)
         detections = 0
+        scored_candidates = []
 
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            x, y, width, height = cv2.boundingRect(contour)
+        for contour, (x, y, width, height), crop in candidates:
+            # Model scoring using PyTorch MobileNetV3
+            if model is not None:
+                prob = predict_oil_probability(crop, model)
+            else:
+                prob = 0.0
 
-            touches_edge = (
-                x <= 10
-                or y <= 10
-                or x + width >= image_width - 10
-                or y + height >= image_height - 10
+            scored_candidates.append(prob)
+
+            # Score confidence threshold logic
+            if prob >= 0.75:
+                detections += 1
+                label = f"High oil-like confidence — human review required ({prob * 100:.1f}%)"
+                color = (0, 0, 255)  # Red for high confidence
+            elif 0.45 <= prob < 0.75:
+                detections += 1
+                label = f"Possible slick — human review required ({prob * 100:.1f}%)"
+                color = (0, 255, 255)  # Yellow for medium confidence
+            else:
+                # Below 0.45: do not show a positive alert
+                continue
+
+            cv2.rectangle(
+                result,
+                (x, y),
+                (x + width, y + height),
+                color,
+                3,
             )
 
-            if area > minimum_area and not touches_edge:
-                crop = original[y:y + height, x:x + width]
+            cv2.putText(
+                result,
+                label,
+                (x, max(25, y - 10)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                color,
+                2,
+            )
 
-                # Model scoring using PyTorch MobileNetV3
-                if model is not None:
-                    prob = predict_oil_probability(crop, model)
-                else:
-                    prob = 0.0
+        m_col1, m_col2 = st.columns(2)
+        with m_col1:
+            st.metric("OpenCV Candidates Found", opencv_candidates)
+        with m_col2:
+            st.metric("AI Confirmed Slicks (≥ 45%)", detections)
 
-                # Score confidence threshold logic
-                if prob >= 0.75:
-                    detections += 1
-                    label = f"High oil-like confidence — human review required ({prob * 100:.1f}%)"
-                    color = (0, 0, 255)  # Red for high confidence
-                elif 0.45 <= prob < 0.75:
-                    detections += 1
-                    label = f"Possible slick — human review required ({prob * 100:.1f}%)"
-                    color = (0, 255, 255)  # Yellow for medium confidence
-                else:
-                    # Below 0.45: do not show a positive alert
-                    continue
-
-                cv2.rectangle(
-                    result,
-                    (x, y),
-                    (x + width, y + height),
-                    color,
-                    3,
-                )
-
-                cv2.putText(
-                    result,
-                    label,
-                    (x, max(25, y - 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    color,
-                    2,
-                )
-
-        st.metric("Possible slick areas found", detections)
+        if opencv_candidates == 0:
+            st.info("💡 **No dark regions detected by OpenCV.** Try switching the **Detection Strategy** to **Auto-Adaptive** or adjusting the **Minimum area** / **Darkness threshold**.")
+        elif detections == 0:
+            max_score = max(scored_candidates) * 100 if scored_candidates else 0.0
+            st.info(f"ℹ️ **OpenCV found {opencv_candidates} candidate region(s)**, but MobileNet model confidence was **{max_score:.1f}%** (below the 45% threshold required to trigger an alert).")
 
         left, right = st.columns(2)
 
