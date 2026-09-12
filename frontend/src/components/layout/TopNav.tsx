@@ -1,5 +1,5 @@
 import React from 'react';
-import { Anchor, ShieldCheck, User, LogOut } from 'lucide-react';
+import { Anchor, ShieldCheck } from 'lucide-react';
 
 export const TopNav: React.FC = () => {
   return (
@@ -17,7 +17,7 @@ export const TopNav: React.FC = () => {
         </div>
       </div>
 
-      {/* Status Badges & Profile */}
+      {/* Status Badges */}
       <div className="flex items-center space-x-4 text-xs">
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-medium">
           <ShieldCheck className="w-3.5 h-3.5" />
@@ -28,16 +28,6 @@ export const TopNav: React.FC = () => {
           <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
           Synthetic AIS / Demo
         </span>
-
-        <div className="h-4 w-px bg-slate-800"></div>
-
-        <div className="flex items-center space-x-2 text-slate-300">
-          <User className="w-4 h-4 text-slate-400" />
-          <span className="font-medium">Analyst analyst1</span>
-          <button className="text-slate-400 hover:text-slate-200 ml-1">
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
       </div>
     </header>
   );
