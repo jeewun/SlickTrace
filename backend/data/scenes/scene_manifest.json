@@ -1,0 +1,32 @@
+[
+  {
+    "scene_id": "S1C_20260824T142210",
+    "label": "Ranked lead ready",
+    "status": "detected",
+    "maritime_window": "India EEZ",
+    "scene_time": "24 Aug 2026 14:22 IST",
+    "filename": "class_1_01677.jpg",
+    "slick_lat": 18.9500,
+    "slick_lon": 72.4000
+  },
+  {
+    "scene_id": "S1C_20260824T101505",
+    "label": "Outside India EEZ",
+    "status": "out_of_zone",
+    "maritime_window": "Outside India EEZ",
+    "scene_time": "24 Aug 2026 10:15 IST",
+    "filename": "class_1_01675.jpg",
+    "slick_lat": 17.5000,
+    "slick_lon": 68.2000
+  },
+  {
+    "scene_id": "S1A_20260823T231040",
+    "label": "No oil slick detected",
+    "status": "clear",
+    "maritime_window": "India EEZ",
+    "scene_time": "23 Aug 2026 23:10 IST",
+    "filename": "class_0_03687.jpg",
+    "slick_lat": 19.2000,
+    "slick_lon": 71.5000
+  }
+]
